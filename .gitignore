@@ -1,0 +1,22 @@
+# omit archived old implementations
+/history_buildings
+
+#omit mcap files
+/mcap_data
+/ros2_ghadron_gimbal/mcap_recording
+
+
+#omit build files
+/ros2_ghadron_gimbal/build
+/ros2_ghadron_gimbal/install
+/ros2_ghadron_gimbal/log
+
+#omit model weights
+/ros2_ghadron_gimbal/models
+
+archive_tracking.tar.gz
+
+ros2_ghadron_gimbal.zip
+
+
+
