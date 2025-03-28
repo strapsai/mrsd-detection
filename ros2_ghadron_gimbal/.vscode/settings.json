@@ -1,0 +1,6 @@
+{
+    "cmake.sourceDirectory": "/home/dtc-mrsd/Downloads/ros2_gimbal_ws/src/PayloadSdk",
+    "files.associations": {
+        "chrono": "cpp"
+    }
+}
