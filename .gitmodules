@@ -1,0 +1,4 @@
+[submodule "ros2_ghadron_gimbal/src/PayloadSdk"]
+	path = ros2_ghadron_gimbal/src/PayloadSdk
+	url = https://github.com/Gremsy/PayloadSdk.git
+	branch = develop
