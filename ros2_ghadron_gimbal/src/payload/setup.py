@@ -20,6 +20,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'payload_node = payload.payload_node:main'
         ],
     },
 )

@@ -68,6 +68,11 @@ def generate_launch_description():
              executable='integrated_node',
              name='integrated_node',
              output='screen'),
+
+        Node(package='payload',
+             executable='payload_node',
+             name='payload_node',
+             output='screen'),
         
         # 图像查看节点 - 不保存单独图像文件
         Node(

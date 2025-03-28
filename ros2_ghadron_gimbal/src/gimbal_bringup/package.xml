@@ -17,6 +17,7 @@
   <!-- <exec_depend>yolo_detection</exec_depend> -->
   <exec_depend>inted_gimbal</exec_depend>
   <exec_depend>launch_ros</exec_depend>
+  <exec_depend>payload</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
