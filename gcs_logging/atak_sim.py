@@ -17,28 +17,35 @@ import os # Needed for font path finding if necessary
 EARTH_RADIUS_METERS = 6371000.0
 IMAGE_WIDTH = 1024 # Pixels
 IMAGE_HEIGHT = 1024 # Pixels
-TARGET_GROUND_SIDE_METERS = 30.0 # Desired map coverage
+TARGET_GROUND_SIDE_METERS = 50.0 # Desired map coverage
 # Google Maps Satellite Tile URL (Ensure compliance with terms of service)
 SAT_TILE_URL = 'https://mt0.google.com/vt/lyrs=s&hl=en&x={x}&y={y}&z={z}'
 # Alternative: OpenStreetMap (No satellite)
 # SAT_TILE_URL = 'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png'
-# Text Annotation Settings
+
+# --- Visual Style Constants ---
+BLUE_MARKER_COLOR = 'blue'
+RED_MARKER_COLOR = 'red'
+MARKER_RADIUS = 12 # Increased marker size
 ANNOTATION_COLOR = 'yellow'
-LINE_COLOR = 'yellow'
-LINE_WIDTH = 2
+ANNOTATION_LINE_COLOR = 'yellow'
+ANNOTATION_LINE_WIDTH = 3 # Increased line thickness
+GEOFENCE_COLOR = 'cyan'
+GEOFENCE_LINE_WIDTH = 2
+
 # Attempt to load a default font, fallback possible
 try:
-    # Try common paths or just the name if it's in system fonts
-    ANNOTATION_FONT = ImageFont.truetype("arial.ttf", 14)
+    ANNOTATION_FONT_SIZE = 16 # Increased font size
+    ANNOTATION_FONT = ImageFont.truetype("arial.ttf", ANNOTATION_FONT_SIZE)
 except IOError:
     # Fallback for Windows if arial.ttf isn't directly found
     try:
         font_path = os.path.join(os.environ.get('WINDIR', 'C:\\Windows'), 'Fonts', 'arial.ttf')
-        ANNOTATION_FONT = ImageFont.truetype(font_path, 14)
+        ANNOTATION_FONT = ImageFont.truetype(font_path, ANNOTATION_FONT_SIZE)
         print("INFO: Using Arial font found at:", font_path)
     except IOError:
         print("WARN: Arial font not found in common locations. Using default PIL font.")
-        ANNOTATION_FONT = ImageFont.load_default()
+        ANNOTATION_FONT = ImageFont.load_default() # Default font size might be small
 
 
 def geo_to_pixel(lat, lon, center_lat, center_lon, zoom, width, height):
@@ -71,8 +78,9 @@ def geo_to_pixel(lat, lon, center_lat, center_lon, zoom, width, height):
 class AtakSimulatorNode(Node):
     """
     ROS2 Node to simulate an ATAK-like display.
+    - Takes geofence points (cyan polygon).
     - Takes initial GPS points (blue circles).
-    - Displays them on a satellite map centered at the centroid.
+    - Displays them on a satellite map centered at the centroid of blue points.
     - Subscribes to target GPS points (red circles).
     - Calculates distance between new targets and closest initial point.
     - Draws a line and distance annotation on the map for the latest target.
@@ -82,6 +90,7 @@ class AtakSimulatorNode(Node):
         super().__init__('atak_simulator_node')
 
         # --- State Variables ---
+        self.geofence_points = [] # List of (lat, lon) for geofence polygon
         self.blue_points = [] # List of (lat, lon) tuples for initial points
         self.target_points = {} # Dict: {frame_id: (lat, lon)} for subscribed points
         self.map_object = None # Holds the StaticMap instance
@@ -92,6 +101,9 @@ class AtakSimulatorNode(Node):
         self.last_publish_time = 0
         self.publish_rate_limit = 0.5 # Seconds - allow faster updates for annotation
         self.last_annotation_details = None # Store details for drawing text post-render
+
+        # --- Get Geofence Coordinates ---
+        self.get_geofence_coordinates()
 
         # --- Get Initial Coordinates ---
         self.get_initial_coordinates()
@@ -116,21 +128,23 @@ class AtakSimulatorNode(Node):
         self.get_logger().info("ATAK Simulator Node initialized.")
         if self.blue_points:
              self.get_logger().info(f"Centroid: {self.centroid}, Zoom: {self.zoom_level}")
+        if self.geofence_points:
+             self.get_logger().info(f"Geofence defined with {len(self.geofence_points)} points.")
 
-
-    def get_initial_coordinates(self):
-        """ Prompts user for initial GPS coordinates via command line. """
-        self.get_logger().info("--- Enter Initial GPS Coordinates ---")
+    def _get_coordinates_from_user(self, prompt_title, point_type_name):
+        """ Helper function to get a list of coordinates from user input. """
+        points = []
+        self.get_logger().info(f"--- {prompt_title} ---")
         print("Enter latitude and longitude (decimal degrees), separated by space.")
         print("Example: 40.443 -79.945")
         while True:
             try:
-                line = input("Lat Lon (or press Enter to finish): ").strip()
+                line = input(f"{point_type_name} Lat Lon (or press Enter to finish): ").strip()
                 if not line:
-                    if not self.blue_points:
-                        print("No coordinates entered.")
+                    if not points:
+                        print(f"No {point_type_name.lower()} coordinates entered.")
                     else:
-                        print(f"Finished collecting {len(self.blue_points)} points.")
+                        print(f"Finished collecting {len(points)} {point_type_name.lower()} points.")
                     break
 
                 parts = line.split()
@@ -146,16 +160,24 @@ class AtakSimulatorNode(Node):
                      print("Invalid latitude (-90 to 90) or longitude (-180 to 180) values.")
                      continue
 
-                self.blue_points.append((lat, lon))
-                print(f"Added: ({lat}, {lon}). Points so far: {len(self.blue_points)}")
+                points.append((lat, lon))
+                print(f"Added {point_type_name} Point: ({lat}, {lon}). Points so far: {len(points)}")
 
             except ValueError:
                 print("Invalid input. Please enter numeric values for latitude and longitude.")
             except EOFError: # Handle Ctrl+D
                  print("\nInput terminated.")
                  break
+        self.get_logger().info(f"Collected {len(points)} {point_type_name.lower()} coordinates.")
+        return points
 
-        self.get_logger().info(f"Collected {len(self.blue_points)} initial coordinates.")
+    def get_geofence_coordinates(self):
+        """ Prompts user for geofence GPS coordinates via command line. """
+        self.geofence_points = self._get_coordinates_from_user("Enter Geofence Coordinates (in order)", "Geofence")
+
+    def get_initial_coordinates(self):
+        """ Prompts user for initial (blue) GPS coordinates via command line. """
+        self.blue_points = self._get_coordinates_from_user("Enter Initial (Blue) GPS Coordinates", "Blue")
 
     def calculate_zoom_level(self, center_lat):
         """ Calculates the zoom level needed for ~TARGET_GROUND_SIDE_METERS map width. """
@@ -188,8 +210,36 @@ class AtakSimulatorNode(Node):
             self.get_logger().error(f"Error calculating zoom level: {e}. Using default 18.")
             return 18
 
+    def _add_map_elements(self):
+        """ Helper to add geofence, blue points, and red points to the map object. """
+        if self.map_object is None: return
+
+        # Add Geofence Lines
+        if len(self.geofence_points) >= 2:
+            self.get_logger().debug(f"Drawing geofence with {len(self.geofence_points)} points.")
+            # Convert to (lon, lat) for staticmap
+            fence_coords_lonlat = [(p[1], p[0]) for p in self.geofence_points]
+            # Draw lines between consecutive points
+            for i in range(len(fence_coords_lonlat) - 1):
+                line = Line([fence_coords_lonlat[i], fence_coords_lonlat[i+1]], GEOFENCE_COLOR, GEOFENCE_LINE_WIDTH)
+                self.map_object.add_line(line)
+            # Draw line connecting last to first if it's a polygon (3+ points)
+            if len(fence_coords_lonlat) >= 3:
+                line = Line([fence_coords_lonlat[-1], fence_coords_lonlat[0]], GEOFENCE_COLOR, GEOFENCE_LINE_WIDTH)
+                self.map_object.add_line(line)
+
+        # Add blue circle markers
+        for lat, lon in self.blue_points:
+            marker = CircleMarker((lon, lat), BLUE_MARKER_COLOR, MARKER_RADIUS)
+            self.map_object.add_marker(marker)
+
+        # Add red circle markers
+        for r_lat, r_lon in self.target_points.values():
+            marker = CircleMarker((r_lon, r_lat), RED_MARKER_COLOR, MARKER_RADIUS)
+            self.map_object.add_marker(marker)
+
     def generate_initial_map(self):
-        """ Calculates centroid, determines zoom, fetches map, and plots blue points. """
+        """ Calculates centroid, determines zoom, fetches map, adds elements. """
         if not self.blue_points:
             self.get_logger().error("Cannot generate map: No initial coordinates.")
             return
@@ -201,9 +251,8 @@ class AtakSimulatorNode(Node):
 
         self.map_object = StaticMap(IMAGE_WIDTH, IMAGE_HEIGHT, url_template=SAT_TILE_URL)
 
-        for lat, lon in self.blue_points:
-            marker = CircleMarker((lon, lat), 'blue', 8)
-            self.map_object.add_marker(marker)
+        # Add geofence and blue points
+        self._add_map_elements()
 
         try:
             self.current_pil_image = self.map_object.render(zoom=self.zoom_level, center=(self.centroid[1], self.centroid[0]))
@@ -277,25 +326,16 @@ class AtakSimulatorNode(Node):
             # --- Re-render the Map ---
             self.map_object = StaticMap(IMAGE_WIDTH, IMAGE_HEIGHT, url_template=SAT_TILE_URL)
 
-            # Add blue markers
-            for b_lat, b_lon in self.blue_points:
-                marker = CircleMarker((b_lon, b_lat), 'blue', 8)
-                self.map_object.add_marker(marker)
+            # Add geofence, blue points, and ALL red points
+            self._add_map_elements()
 
-            # Add red markers (all current ones)
-            for r_frame_id, (r_lat, r_lon) in self.target_points.items():
-                 # Make the latest target slightly different? (Optional)
-                 # color = 'red' if r_frame_id != frame_id else 'orange'
-                 marker = CircleMarker((r_lon, r_lat), 'red', 8)
-                 self.map_object.add_marker(marker)
-
-            # Add line if closest blue point was found for the *current* target update
+            # Add annotation line if closest blue point was found for the *current* target update
             if self.last_annotation_details:
                 line_coords = [
                     (self.last_annotation_details["red_coord"][1], self.last_annotation_details["red_coord"][0]), # lon, lat
                     (self.last_annotation_details["blue_coord"][1], self.last_annotation_details["blue_coord"][0]) # lon, lat
                 ]
-                line = Line(line_coords, LINE_COLOR, LINE_WIDTH)
+                line = Line(line_coords, ANNOTATION_LINE_COLOR, ANNOTATION_LINE_WIDTH)
                 self.map_object.add_line(line)
 
             try:
